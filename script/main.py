@@ -73,27 +73,14 @@ def main():
         img_bgr = cv2.imread(image_name)
         img_bgr_next = cv2.imread(image_names[image_id+1]) 
 
-        poses_restart = restart_path(poses_m[image_id+1:image_id+50,:])
-        mask = project(img_bgr,poses_restart[:,3:12:4],intrinsic,[1.7,4,5])
-
+        poses_restart = restart_path(poses_m[image_id+1:image_id+100,:])
+        mask = project(img_bgr,poses_restart[:,3:12:4],intrinsic,[1.7,2,5])
+        mask_prob = project_prab(img_bgr,poses_restart[:,3:12:4],intrinsic,[1.7,2,5],6)
+        
         mask_unroad = np.zeros(img.shape)
         mask_unroad[0:mask_unroad.shape[0]//2,:] =1
-        road_segmentation(img,mask,mask_unroad)
-        #road_segmentation(img_bgr,mask,mask_unroad)
-        #optimize(img_bgr,img_bgr_next,motions_se[image_id],plane,intrinsic,mask)
-        '''
-        img_homo,valid =homo_warp.homograph_warp(tT(img_bgr.transpose(2,0,1)),tT(motions_se[image_id]),tT(plane),tT(intrinsic),tT(intrinsic))
-        img_homo = np.array(img_homo.squeeze()).transpose(1,2,0)
-        img_diff = np.abs(img_homo - img_bgr_next)
-        img_ssim = pytorch_ssim.ssim_map(itT(img_homo)/255,itT(img_bgr_next)/255)
-        cv2.imshow('homo',img_homo/255)
-        #img_bgr = cv2.resize(img_bgr,(param.img_w,param.img_h))
-        cv2.imshow('image',img_bgr)
-        cv2.imshow('image_next',img_bgr_next)
-        cv2.imshow('diff',img_diff/255)
-        cv2.imshow('ssim',np.mean(tI(img_ssim),2))
-        '''
-        
+        road2 = road_segmentation(img_bgr,mask,mask_unroad,prior = mask_prob, flag_vis = False)
+       
         image_id+=1
 
 def itT(a):
@@ -105,55 +92,76 @@ def tI(a):
 
 
 
-
-def road_segmentation(img,mask_road,mask_unroad,prior=0.5):
+def road_segmentation(img,mask_road,mask_unroad,prior=0.5,flag_vis=True):
+    #get_prior(img,mask_road)
     dis_road = distribution(img,mask_road)
     dis_unroad = distribution(img,mask_unroad)
-    print(len(img.shape))
     road_prab=[]
     if len(img.shape)==2:
-        dis_road_color = prior*dis_road[0]/(prior*dis_road[0]+(1-prior)*dis_unroad[0])
-        print(dis_road_color.shape)
+        dis_road_color = prior*dis_road[0]/(prior*dis_road[0]+(1-prior)*dis_unroad[0]+0.000000000001)
         road_prab  = np.array([dis_road_color[d] for d in img.reshape(-1)]).reshape(img.shape)
     elif len(img.shape)==3:
         road_prab = np.zeros((img.shape[0],img.shape[1]))
-        dis_road_color = prior*dis_road[0]/(prior*dis_road[0]+(1-prior)*dis_unroad[0])
+        dis_road_color = 0.5*dis_road[0]/(0.5*dis_road[0]+(1-0.5)*dis_unroad[0])
         for i_row in range(img.shape[0]):
             for i_col in range(img.shape[1]):
                 color = img[i_row,i_col]
-                p_xr = prior*dis_road[0][color[0]]*dis_road[1][color[1]]*dis_road[2][color[2]]
-                p_xnr= (1-prior)*dis_unroad[0][color[0]]*dis_unroad[1][color[1]]*dis_unroad[2][color[2]]
-                road_prab[i_row,i_col] = p_xr/(p_xr+p_xnr)
-        print(road_prab.shape)
-    print(road_prab.shape)
-    import matplotlib.pyplot as plt
-    ax1 = plt.subplot(311)
-    pos1 = ax1.imshow(road_prab,cmap='gray')
-    ax1.set_title('Road Probability')
-    ax1.margins(0)
-    ax2 = plt.subplot(323)
-    ax2.plot(dis_road[0],'g',label='P(c|r)')
-    ax2.plot(dis_unroad[0],'r',label='P(c|~r)')
-    ax2.set_ylim(0,0.05)
-    ax2.legend()
-    ax3 = plt.subplot(324)
-    ax3.plot(dis_road_color,'b',label='P(r|c)')
-    ax3.legend()
-    ax4 = plt.subplot(337)
-    ax4.set_title('input image')
-    ax4.imshow(img)
-    ax5 = plt.subplot(338)
-    ax5.set_title('Road mask')
-    road_img = img.copy()
-    road_img[mask_road==1]=255
-    ax5.imshow(road_img)
-    ax6 = plt.subplot(339)
-    ax6.set_title('Non-Road mask')
-    unroad_img = img.copy()
-    unroad_img[mask_unroad==1]=0
-    ax6.imshow(unroad_img)
-    plt.show()
+                prior_ = prior
+                if type(prior) is not float:
+                    prior_= prior[i_row,i_col]
+                p_xr = prior_*dis_road[0][color[0]]*dis_road[1][color[1]]*dis_road[2][color[2]]
+                p_xnr= (1-prior_)*dis_unroad[0][color[0]]*dis_unroad[1][color[1]]*dis_unroad[2][color[2]]
+                road_prab[i_row,i_col] = p_xr/(p_xr+p_xnr+0.000000000001)
+    if flag_vis: 
+        import matplotlib.pyplot as plt
+        ax1 = plt.subplot(311)
+        pos1 = ax1.imshow(road_prab)
+        ax1.set_title('Road Probability')
+        ax1.margins(0)
+        ax2 = plt.subplot(323)
+        ax2.plot(dis_road[0],'g',label='P(c|r)')
+        ax2.plot(dis_unroad[0],'r',label='P(c|~r)')
+        ax2.set_ylim(0,0.05)
+        ax2.legend()
+        ax3 = plt.subplot(324)
+        ax3.plot(dis_road_color,'b',label='P(r|c)')
+        ax3.legend()
+        ax4 = plt.subplot(337)
+        ax4.set_title('input image')
+        ax4.imshow(img)
+        ax5 = plt.subplot(338)
+        ax5.set_title('Road mask')
+        road_img = img.copy()
+        road_img[mask_road==1]=255
+        ax5.imshow(road_img)
+        ax6 = plt.subplot(339)
+        ax6.set_title('Non-Road mask')
+        unroad_img = img.copy()
+        unroad_img[mask_unroad==1]=0
+        ax6.imshow(unroad_img)
+        plt.show()
+    return road_prab
 
+def get_prior_x(img,mask):
+    return None
+    
+
+def get_prior(img,mask):
+    region_size = np.sum(mask)
+    mask_edge_x = np.abs(mask[:,1:]-mask[:,:-1])
+    mask_edge_y = np.abs(mask[1:,:]-mask[:-1,:])
+    edge_x_size = np.sum(mask_edge_x)/2
+    p_r_nr      = edge_x_size/(region_size*2)
+    p_r_r       =  - p_r_nr
+    p_nr_r      = edge_x_size/(img.shape[0]*img.shape[1]/2 - region_size)
+    print(p_r_nr,p_nr_r)
+
+    import matplotlib.pyplot as plt
+    if False:
+        plt.imshow(mask_edge_x)
+        plt.show()
+        plt.imshow(mask_edge_y)
+        plt.show()
 
 def distribution(img,mask):
     if len(img.shape)==2:
@@ -188,6 +196,56 @@ def restart_path(poses):
         new_poses[i,:] = m2l(res)
     return new_poses[1:,:]
 
+def project_prab(img,path,intrinsic,car,max_road_width):
+    path[:,1] +=car[0]
+    uvz  = intrinsic@path.transpose(1,0)
+    u    = uvz[0,:]/uvz[2,:]
+    v    = uvz[1,:]/uvz[2,:]
+    w    = (v - intrinsic[1,2])*intrinsic[0,0]*car[1]/(intrinsic[1,1]*car[0])
+    h    = car[2]*car[0]*intrinsic[1,1]/(path[:,2]*(path[:,2]-car[2]))
+    valid = (v<img.shape[0])&(v>0)&(path[:,2]-car[2]>0)
+    path = path[valid,:]
+    u = u[valid]
+    v = v[valid]
+    w = w[valid]
+    h = h[valid]
+    w_r    = w*max_road_width/car[1]
+    w_diff = w_r - w
+    mask = np.zeros((img.shape[0],img.shape[1]))
+    for i in range(0,len(u)):
+        #cv2.circle(img,(int(u[i]),int(v[i])),3,(255,0,0),-1)
+        lt  = (int(u[i]-w[i]/2),int(v[i]))
+        rl  = (int(u[i]+w[i]/2),int(v[i]+h[i]))
+        mask[lt[1]:rl[1],lt[0]:rl[0]]=1
+
+        lt  = (int(u[i]-w_r[i]+w[i]/2),int(v[i]))
+        rl  = (int(u[i]-w[i]/2),int(v[i]+h[i]))
+        shift_u = 0
+        shift_v = 0
+        if lt[0]<0:
+            shift_u = -lt[0]
+        if rl[1]>img.shape[0]:
+            shift_v = rl[1] -img.shape[0]
+        mask_local = np.array([[pow(u/w_diff[i],2) for u in range(0,rl[0]-lt[0])]])
+        mask_local = np.repeat(mask_local,rl[1]-lt[1],axis=0)
+        mask[lt[1]:rl[1],lt[0]:rl[0]]=mask_local[:rl[1]-lt[1]-shift_v,shift_u:]
+
+        lt  = (int(u[i]+w[i]/2),int(v[i]))
+        rl  = (int(u[i]+w_r[i]-w[i]/2),int(v[i]+h[i]))
+        shift_u = 0
+        shift_v = 0
+        if rl[0]>img.shape[1]:
+            shift_u = rl[0] -img.shape[1]
+        if rl[1]>img.shape[0]:
+            shift_v = rl[1] -img.shape[0]
+        mask_local = np.array([[pow(1-u/w_diff[i],2) for u in range(0,rl[0]-lt[0])]])
+        mask_local = np.repeat(mask_local,rl[1]-lt[1],axis=0)
+        mask[lt[1]:rl[1],lt[0]:rl[0]]=mask_local[:rl[1]-lt[1]-shift_v,:rl[0]-lt[0]-shift_u]
+
+    return mask
+
+
+
 # img reference image [w,h,3]
 # path                [n,3]
 # intrinsic           [3,3]
@@ -199,7 +257,7 @@ def project(img,path,intrinsic,car):
     v    = uvz[1,:]/uvz[2,:]
     w    = (v - intrinsic[1,2])*intrinsic[0,0]*car[1]/(intrinsic[1,1]*car[0])
     h    = car[2]*car[0]*intrinsic[1,1]/(path[:,2]*(path[:,2]-car[2]))
-    valid = (v<img.shape[1])&(v>0)&(path[:,2]-car[2]>0)
+    valid = (v<img.shape[0])&(v>0)&(path[:,2]-car[2]>0)
     path = path[valid,:]
     u = u[valid]
     v = v[valid]
@@ -227,3 +285,49 @@ def project(img,path,intrinsic,car):
 
 if __name__ == '__main__':
     main()
+
+
+# code below are backup code
+ '''
+import matplotlib.pyplot as plt
+        ax1 = plt.subplot(211)
+        pos1 = ax1.imshow(mask)
+        ax1.set_title('drive path')
+        ax1.margins(100)
+        ax1 = plt.subplot(212)
+        pos1 = ax1.imshow(mask_prob)
+        ax1.set_title('road probability')
+        plt.show()
+
+        import matplotlib.pyplot as plt
+        ax1 = plt.subplot(311)
+        pos1 = ax1.imshow(road0)
+        ax1.set_title('gray')
+        ax1.margins(100)
+        ax1 = plt.subplot(312)
+        pos1 = ax1.imshow(road1)
+        ax1.set_title('rgb')
+        ax1 = plt.subplot(313)
+        pos1 = ax1.imshow(road2)
+        ax1.set_title('rgb+prior')
+        plt.show()
+
+#road1 =road_segmentation(img_bgr,mask,mask_unroad,prior = 0.5,flag_vis=False)
+        #road0 =road_segmentation(img,mask,mask_unroad,prior = 0.5,flag_vis=False)
+        #road_segmentation(img_bgr,mask,mask_unroad)
+        #optimize(img_bgr,img_bgr_next,motions_se[image_id],plane,intrinsic,mask)
+
+ '''
+                '''
+        img_homo,valid =homo_warp.homograph_warp(tT(img_bgr.transpose(2,0,1)),tT(motions_se[image_id]),tT(plane),tT(intrinsic),tT(intrinsic))
+        img_homo = np.array(img_homo.squeeze()).transpose(1,2,0)
+        img_diff = np.abs(img_homo - img_bgr_next)
+        img_ssim = pytorch_ssim.ssim_map(itT(img_homo)/255,itT(img_bgr_next)/255)
+        cv2.imshow('homo',img_homo/255)
+        #img_bgr = cv2.resize(img_bgr,(param.img_w,param.img_h))
+        cv2.imshow('image',img_bgr)
+        cv2.imshow('image_next',img_bgr_next)
+        cv2.imshow('diff',img_diff/255)
+        cv2.imshow('ssim',np.mean(tI(img_ssim),2))
+        '''
+ 
