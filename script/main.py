@@ -28,9 +28,11 @@ def main():
         if len(image_name) == 0:
             break
         img_bgr = cv2.imread(image_name)
+        img_bgr_cur = cv2.imread(image_names[image_id+5])
         poses_restart = restart_path(poses_m[image_id+1:image_id+100,:])
 
         road_segmentor.EMProcess(img_bgr,poses_restart[:,3:12:4])
+        road_segmentor.EMProcess(img_bgr_cur)
         image_id+=1
         
 
